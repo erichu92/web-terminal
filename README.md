@@ -37,6 +37,14 @@ LLM CLI 도구(Claude Code, GitHub Copilot CLI 등)의 보급으로 **모바일�
 📱 모바일: "파일 목록 보여줘" (음성) → ls -la (실행)
 ```
 
+<img width="286" alt="image" src="https://github.com/user-attachments/assets/f5785adb-3161-4009-a836-7bfbd1ef3e59" />
+<img width="289" alt="image" src="https://github.com/user-attachments/assets/34860683-06f6-4548-94c6-2974041aa0d8" />
+<img width="291" alt="image" src="https://github.com/user-attachments/assets/18355e39-4234-43ec-87e1-ac8640fd7b5b" />
+<img width="293" alt="image" src="https://github.com/user-attachments/assets/68a6ba00-e5b2-4f43-9e6a-0c82b3fc7880" />
+<img width="289" alt="image" src="https://github.com/user-attachments/assets/0cd8e5fb-1204-4447-bda4-ffa8b1086aa1" />
+
+
+
 **침대에서도, 카페에서도, 지하철에서도** - 어디서든 집의 개발 환경과 AI에 접속해서 실제 개발이 가능합니다!
 
 ### 💡 **실제 활용 예시**
