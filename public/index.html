@@ -109,6 +109,36 @@
         .control-btn:active {
             background: #555;
         }
+
+        .voice-btn {
+            background: #006600;
+            border: none;
+            color: #fff;
+            padding: 12px 16px;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            position: relative;
+        }
+        
+        .voice-btn.recording {
+            background: #ff0000;
+            animation: pulse 1s infinite;
+        }
+        
+        .voice-btn:active {
+            background: #008800;
+        }
+        
+        .voice-btn.recording:active {
+            background: #cc0000;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
         
         #login-form {
             position: fixed;
@@ -176,12 +206,12 @@
             <input type="text" id="command-input" placeholder="명령어 입력..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
         </div>
         
-        
         <div id="controls">
             <button class="control-btn" onclick="sendEsc()">ESC</button>
             <button class="control-btn" onclick="clearTerminal()">지우기</button>
             <button class="control-btn" onclick="sendCtrlC()">Ctrl+C</button>
-            <button class="control-btn" onclick="disconnect()">연결끊기</button>
+            <button class="voice-btn" id="voice-btn" onclick="toggleVoiceInput()">🎤 음성</button>
+            <button class="control-btn" onclick="sendEnter()">⏎ Enter</button>
         </div>
     </div>
     
@@ -203,6 +233,176 @@
         let lastOutput = '';
         let outputBuffer = '';
         let bufferTimeout = null;
+        
+        // 음성 인식 관련 변수
+        let recognition = null;
+        let isRecording = false;
+        
+        // 음성 인식 초기화
+        function initVoiceRecognition() {
+            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                recognition.lang = 'ko-KR';
+                
+                recognition.onstart = () => {
+                    isRecording = true;
+                    const voiceBtn = document.getElementById('voice-btn');
+                    voiceBtn.classList.add('recording');
+                    voiceBtn.textContent = '🔴 녹음중';
+                    appendToTerminal('\n[음성 인식 시작]\n');
+                };
+                
+                recognition.onresult = (event) => {
+                    const transcript = event.results[0][0].transcript;
+                    appendToTerminal(`[음성 인식]: ${transcript}\n`);
+                    
+                    // 음성을 명령어로 변환
+                    const command = convertSpeechToCommand(transcript);
+                    if (command) {
+                        document.getElementById('command-input').value = command;
+                        appendToTerminal(`[변환된 명령어]: ${command}\n`);
+                    }
+                };
+                
+                recognition.onerror = (event) => {
+                    appendToTerminal(`[음성 인식 오류]: ${event.error}\n`);
+                };
+                
+                recognition.onend = () => {
+                    isRecording = false;
+                    const voiceBtn = document.getElementById('voice-btn');
+                    voiceBtn.classList.remove('recording');
+                    voiceBtn.textContent = '🎤 음성';
+                    appendToTerminal('[음성 인식 종료]\n');
+                };
+                
+                return true;
+            } else {
+                appendToTerminal('[음성 인식이 지원되지 않는 브라우저입니다]\n');
+                return false;
+            }
+        }
+        
+        // 음성을 명령어로 변환
+        function convertSpeechToCommand(speech) {
+            const text = speech.toLowerCase().trim();
+            
+            // 한글 음성 명령어를 영어 명령어로 변환
+            const voiceCommands = {
+                // 기본 명령어
+                '리스트': 'ls',
+                '파일 목록': 'ls -la',
+                '파일목록': 'ls -la',
+                '디렉토리 목록': 'ls -l',
+                '디렉터리 목록': 'ls -l',
+                '현재 디렉토리': 'pwd',
+                '현재디렉토리': 'pwd',
+                '홈으로': 'cd ~',
+                '홈으로 가기': 'cd ~',
+                '위로': 'cd ..',
+                '위로 가기': 'cd ..',
+                '뒤로': 'cd ..',
+                '뒤로 가기': 'cd ..',
+                
+                // Git 명령어
+                '깃 스테이터스': 'git status',
+                '깃 상태': 'git status',
+                '깃상태': 'git status',
+                '깃 로그': 'git log',
+                '깃로그': 'git log',
+                '깃 애드': 'git add .',
+                '깃 커밋': 'git commit -m "update"',
+                '깃 푸시': 'git push',
+                '깃 풀': 'git pull',
+                
+                // 시스템 명령어
+                '프로세스': 'ps aux',
+                '프로세스 목록': 'ps aux',
+                '메모리': 'free -h',
+                '디스크': 'df -h',
+                '네트워크': 'netstat -tuln',
+                '날짜': 'date',
+                '시간': 'date',
+                '업타임': 'uptime',
+                
+                // 개발 관련
+                '노드 버전': 'node --version',
+                '노드버전': 'node --version',
+                'npm 버전': 'npm --version',
+                'npm버전': 'npm --version',
+                '파이썬 버전': 'python --version',
+                '파이썬버전': 'python --version',
+                '도커 버전': 'docker --version',
+                '도커버전': 'docker --version',
+                
+                // 파일 조작
+                '파일 만들기': 'touch ',
+                '디렉토리 만들기': 'mkdir ',
+                '디렉터리 만들기': 'mkdir ',
+                '복사': 'cp ',
+                '이동': 'mv ',
+                '삭제': 'rm ',
+                '권한': 'chmod ',
+                
+                // 텍스트 처리
+                '내용 보기': 'cat ',
+                '텍스트 검색': 'grep ',
+                '파일 찾기': 'find . -name ',
+                
+                // 기타
+                '지우기': 'clear',
+                '클리어': 'clear',
+                '종료': 'exit',
+                '나가기': 'exit',
+                '히스토리': 'history',
+                '도움말': 'help',
+                '맨': 'man ',
+                '매뉴얼': 'man '
+            };
+            
+            // 정확한 매칭 시도
+            if (voiceCommands[text]) {
+                return voiceCommands[text];
+            }
+            
+            // 부분 매칭 시도
+            for (const [korean, command] of Object.entries(voiceCommands)) {
+                if (text.includes(korean)) {
+                    // 추가 파라미터가 있는지 확인
+                    const remaining = text.replace(korean, '').trim();
+                    if (remaining && !command.endsWith(' ')) {
+                        return command + ' ' + remaining;
+                    }
+                    return command;
+                }
+            }
+            
+            // 매칭되는 명령어가 없으면 원본 텍스트 반환
+            return text;
+        }
+        
+        // 음성 입력 토글
+        function toggleVoiceInput() {
+            if (!recognition) {
+                if (!initVoiceRecognition()) {
+                    return;
+                }
+            }
+            
+            if (isRecording) {
+                recognition.stop();
+            } else {
+                try {
+                    recognition.start();
+                } catch (error) {
+                    appendToTerminal(`[음성 인식 시작 오류]: ${error.message}\n`);
+                }
+            }
+        }
         
         // 모바일에서의 터치 이벤트 방지
         document.addEventListener('touchstart', function(e) {
@@ -429,11 +629,19 @@
             sendCommand('\x03');
         }
         
-        function disconnect() {
-            if (ws) {
-                ws.close();
+        function sendEnter() {
+            const input = document.getElementById('command-input');
+            const command = input.value;
+            
+            if (command) {
+                // 명령어가 있으면 명령어와 Enter 키를 별도로 전송
+                sendCommand(command);
+                setTimeout(() => sendCommand('\r'), 50);
+                input.value = '';
+            } else {
+                // 빈 입력일 때는 Enter만 전송
+                sendCommand('\r');
             }
-            document.getElementById('login-form').style.display = 'block';
         }
         
         
