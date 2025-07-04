@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
+const { getLogger } = require('./logger');
 
 class AuthManager {
   constructor() {
@@ -8,6 +9,7 @@ class AuthManager {
     this.jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
     this.tokenExpiration = '1h';
     this.refreshTokenExpiration = '7d';
+    this.logger = getLogger();
     
     this.initializeDefaultUsers();
   }
@@ -23,16 +25,22 @@ class AuthManager {
     };
     
     this.users.set(defaultUser.username, defaultUser);
+    this.logger.info('Default admin user initialized', { 
+      username: defaultUser.username,
+      role: defaultUser.role 
+    });
   }
 
   async login(username, password) {
     const user = this.users.get(username);
     
     if (!user || user.password !== password) {
+      this.logger.authAttempt(username, false);
       throw new Error('Invalid credentials');
     }
 
     user.lastLogin = new Date();
+    this.logger.authAttempt(username, true);
     
     const payload = {
       id: user.id,
@@ -51,6 +59,12 @@ class AuthManager {
     );
 
     this.refreshTokens.set(refreshToken, user.id);
+
+    this.logger.info('User logged in successfully', {
+      userId: user.id,
+      username: user.username,
+      role: user.role
+    });
 
     return {
       token,
