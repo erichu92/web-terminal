@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Test Terminal</title>
+    <style>
+        body {
+            font-family: monospace;
+            background: #000;
+            color: #00ff00;
+            margin: 0;
+            padding: 20px;
+        }
+        
+        #terminal {
+            background: #111;
+            border: 1px solid #333;
+            padding: 10px;
+            height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            margin-bottom: 10px;
+        }
+        
+        #input-area {
+            display: flex;
+            gap: 10px;
+        }
+        
+        #command-input {
+            flex: 1;
+            background: #111;
+            color: #00ff00;
+            border: 1px solid #333;
+            padding: 10px;
+            font-family: monospace;
+        }
+        
+        button {
+            background: #00ff00;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Claude 테스트 터미널</h1>
+    
+    <div id="terminal"></div>
+    
+    <div id="input-area">
+        <input type="text" id="command-input" placeholder="Claude에게 보낼 메시지..." autocomplete="off">
+        <button onclick="sendToClaude()">전송</button>
+        <button onclick="sendEnter()">Enter만</button>
+        <button onclick="startClaude()">Claude 시작</button>
+        <button onclick="clearTerminal()">지우기</button>
+    </div>
+
+    <script>
+        let ws = null;
+        let sessionId = null;
+        
+        // 로그인 없이 바로 연결 (테스트용)
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/terminal`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                appendToTerminal('연결됨. 로그인 중...\n');
+                // 테스트용 자동 로그인
+                fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: 'admin', password: 'admin123' })
+                }).then(res => res.json()).then(data => {
+                    ws.send(JSON.stringify({
+                        type: 'auth',
+                        data: { token: data.token }
+                    }));
+                });
+            };
+            
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                
+                switch (message.type) {
+                    case 'auth':
+                        if (message.data.success) {
+                            appendToTerminal('인증 성공. 세션 생성 중...\n');
+                            ws.send(JSON.stringify({
+                                type: 'session',
+                                data: {
+                                    action: 'create',
+                                    shell: '/bin/bash',
+                                    cols: 80,
+                                    rows: 24
+                                }
+                            }));
+                        }
+                        break;
+                        
+                    case 'session':
+                        if (message.data.action === 'created') {
+                            sessionId = message.data.sessionId;
+                            appendToTerminal('터미널 준비 완료!\n\n');
+                        }
+                        break;
+                        
+                    case 'output':
+                        // 원시 출력 표시 (디버깅용)
+                        const raw = message.data.output;
+                        appendToTerminal(raw);
+                        break;
+                }
+            };
+        }
+        
+        function sendToClause() {
+            const input = document.getElementById('command-input');
+            const command = input.value.trim();
+            
+            if (!command || !sessionId) return;
+            
+            appendToTerminal(`> ${command}\n`);
+            
+            // 명령어를 한 글자씩 전송 (Claude가 실시간으로 볼 수 있도록)
+            for (let i = 0; i < command.length; i++) {
+                setTimeout(() => {
+                    ws.send(JSON.stringify({
+                        type: 'command',
+                        sessionId: sessionId,
+                        data: { command: command[i], encoding: 'utf-8' }
+                    }));
+                }, i * 100);
+            }
+            
+            // 마지막에 Enter 전송
+            setTimeout(() => {
+                ws.send(JSON.stringify({
+                    type: 'command',
+                    sessionId: sessionId,
+                    data: { command: '\r\n', encoding: 'utf-8' }
+                }));
+            }, command.length * 100 + 200);
+            
+            input.value = '';
+        }
+        
+        function sendEnter() {
+            if (!sessionId) return;
+            
+            ws.send(JSON.stringify({
+                type: 'command',
+                sessionId: sessionId,
+                data: { command: '\r\n', encoding: 'utf-8' }
+            }));
+            
+            appendToTerminal('[ENTER 전송됨]\n');
+        }
+        
+        function startClaude() {
+            if (!sessionId) return;
+            
+            appendToTerminal('Claude 시작 중...\n');
+            
+            // claude 명령어 실행
+            const command = 'claude';
+            for (let i = 0; i < command.length; i++) {
+                setTimeout(() => {
+                    ws.send(JSON.stringify({
+                        type: 'command',
+                        sessionId: sessionId,
+                        data: { command: command[i], encoding: 'utf-8' }
+                    }));
+                }, i * 100);
+            }
+            
+            setTimeout(() => {
+                ws.send(JSON.stringify({
+                    type: 'command',
+                    sessionId: sessionId,
+                    data: { command: '\r\n', encoding: 'utf-8' }
+                }));
+            }, command.length * 100 + 200);
+        }
+        
+        function appendToTerminal(text) {
+            const terminal = document.getElementById('terminal');
+            terminal.textContent += text;
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+        
+        function clearTerminal() {
+            document.getElementById('terminal').textContent = '';
+        }
+        
+        // Enter 키로 전송
+        document.getElementById('command-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendToClause();
+            }
+        });
+        
+        // 페이지 로드 시 자동 연결
+        connect();
+    </script>
+</body>
+</html>

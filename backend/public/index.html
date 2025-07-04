@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Terminal</title>
+    <style>
+        body {
+            font-family: monospace;
+            background: #000;
+            color: #00ff00;
+            margin: 0;
+            padding: 20px;
+        }
+        
+        #terminal {
+            background: #111;
+            border: 1px solid #333;
+            padding: 10px;
+            height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        #input-container {
+            margin-top: 10px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        input {
+            flex: 1;
+            background: #111;
+            color: #00ff00;
+            border: 1px solid #333;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        
+        button {
+            background: #00ff00;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        button:hover {
+            background: #00cc00;
+        }
+        
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        #status {
+            margin-bottom: 10px;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        
+        .connected {
+            background: #006600;
+        }
+        
+        .disconnected {
+            background: #660000;
+        }
+        
+        #login-form {
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #111;
+            border: 1px solid #333;
+            max-width: 400px;
+        }
+        
+        #login-form input {
+            margin: 5px 0;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        
+        .error {
+            color: #ff6666;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Web Terminal</h1>
+    
+    <div id="login-form">
+        <h2>로그인</h2>
+        <input type="text" id="username" placeholder="사용자명" value="admin">
+        <input type="password" id="password" placeholder="비밀번호" value="admin123">
+        <button onclick="login()">로그인</button>
+        <div id="error" class="error"></div>
+    </div>
+    
+    <div id="status" class="disconnected">연결 끊김</div>
+    
+    <div id="terminal-container" style="display: none;">
+        <div id="terminal"></div>
+        <div id="input-container">
+            <input type="text" id="command" placeholder="명령어 입력..." onkeypress="handleKeyPress(event)">
+            <button onclick="sendCommand()">전송</button>
+            <button onclick="clearTerminal()">화면 지우기</button>
+            <button onclick="disconnect()">연결 끊기</button>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let token = null;
+        let sessionId = null;
+        
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    token = data.token;
+                    document.getElementById('login-form').style.display = 'none';
+                    document.getElementById('terminal-container').style.display = 'block';
+                    document.getElementById('error').textContent = '';
+                    connectWebSocket();
+                } else {
+                    document.getElementById('error').textContent = '로그인 실패: ' + (data.error || 'Unknown error');
+                }
+            } catch (error) {
+                document.getElementById('error').textContent = '로그인 오류: ' + error.message;
+            }
+        }
+        
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/terminal`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                updateStatus('연결됨', true);
+                // 인증
+                ws.send(JSON.stringify({
+                    type: 'auth',
+                    data: { token }
+                }));
+            };
+            
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                
+                switch (message.type) {
+                    case 'auth':
+                        if (message.data.success) {
+                            appendToTerminal('인증 성공! 세션 생성 중...\n');
+                            // 세션 생성
+                            ws.send(JSON.stringify({
+                                type: 'session',
+                                data: {
+                                    action: 'create',
+                                    shell: '/bin/bash',
+                                    cols: 80,
+                                    rows: 24
+                                }
+                            }));
+                        } else {
+                            appendToTerminal('인증 실패!\n');
+                        }
+                        break;
+                        
+                    case 'session':
+                        if (message.data.action === 'created') {
+                            sessionId = message.data.sessionId;
+                            appendToTerminal('터미널 세션 생성됨!\n\n');
+                        } else if (message.data.action === 'exit') {
+                            appendToTerminal('\n세션이 종료되었습니다.\n');
+                            sessionId = null;
+                        }
+                        break;
+                        
+                    case 'output':
+                        appendToTerminal(message.data.output);
+                        break;
+                        
+                    case 'error':
+                        appendToTerminal(`\n오류: ${message.data.message}\n`);
+                        break;
+                }
+            };
+            
+            ws.onclose = () => {
+                updateStatus('연결 끊김', false);
+                sessionId = null;
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                appendToTerminal('\nWebSocket 오류 발생\n');
+            };
+        }
+        
+        function sendCommand() {
+            const input = document.getElementById('command');
+            const command = input.value;
+            
+            if (!command || !ws || ws.readyState !== WebSocket.OPEN || !sessionId) {
+                return;
+            }
+            
+            ws.send(JSON.stringify({
+                type: 'command',
+                sessionId: sessionId,
+                data: {
+                    command: command + '\n',
+                    encoding: 'utf-8'
+                }
+            }));
+            
+            input.value = '';
+        }
+        
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendCommand();
+            }
+        }
+        
+        function appendToTerminal(text) {
+            const terminal = document.getElementById('terminal');
+            // ANSI escape sequences 제거
+            const cleanText = text
+                .replace(/\x1b\[[0-9;]*m/g, '') // 색상 코드
+                .replace(/\x1b\[(\?)?([0-9]{1,4})(;[0-9]{0,4})*[hlr]/g, '') // 커서 제어
+                .replace(/\x1b\[2004[hl]/g, '') // bracketed paste mode
+                .replace(/\x1b\[K/g, '') // clear line
+                .replace(/\x1b\[J/g, '') // clear screen
+                .replace(/\x1b\[\?2004[hl]/g, '') // bracketed paste mode
+                .replace(/\[\?2004[hl]/g, ''); // 남은 패턴
+            
+            terminal.textContent += cleanText;
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+        
+        function clearTerminal() {
+            document.getElementById('terminal').textContent = '';
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+            }
+            document.getElementById('login-form').style.display = 'block';
+            document.getElementById('terminal-container').style.display = 'none';
+        }
+        
+        function updateStatus(text, isConnected) {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            status.className = isConnected ? 'connected' : 'disconnected';
+        }
+        
+        // Enter 키로 로그인
+        document.getElementById('password').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                login();
+            }
+        });
+    </script>
+</body>
+</html>

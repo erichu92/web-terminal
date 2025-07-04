@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, minimum-scale=1.0">
+    <title>Mobile Web Terminal</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        body {
+            font-family: 'Courier New', monospace;
+            background: #000;
+            color: #00ff00;
+            overflow: hidden;
+            touch-action: manipulation;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        
+        #container {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #header {
+            background: #222;
+            padding: 10px;
+            font-size: 14px;
+            border-bottom: 1px solid #444;
+            flex-shrink: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        #status {
+            font-size: 12px;
+        }
+        
+        .connected { color: #00ff00; }
+        .disconnected { color: #ff0000; }
+        
+        #terminal-container {
+            flex: 1;
+            background: #000;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        #terminal {
+            width: 100%;
+            height: 100%;
+            padding: 10px;
+            font-size: 12px;
+            line-height: 1.2;
+            overflow-y: auto;
+            overflow-x: hidden;
+            white-space: pre-wrap;
+            word-break: break-all;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        #input-area {
+            background: #111;
+            border-top: 1px solid #333;
+            padding: 10px;
+            flex-shrink: 0;
+        }
+        
+        #command-input {
+            width: 100%;
+            background: #222;
+            border: 1px solid #444;
+            color: #00ff00;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            border-radius: 4px;
+            outline: none;
+        }
+        
+        
+        #controls {
+            background: #222;
+            padding: 10px;
+            display: flex;
+            justify-content: space-around;
+            flex-shrink: 0;
+        }
+        
+        .control-btn {
+            background: #333;
+            border: none;
+            color: #fff;
+            padding: 10px 15px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        
+        .control-btn:active {
+            background: #555;
+        }
+        
+        #login-form {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        
+        .login-box {
+            background: #222;
+            padding: 20px;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 300px;
+        }
+        
+        .login-box input {
+            width: 100%;
+            background: #111;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        
+        .login-box button {
+            width: 100%;
+            background: #00ff00;
+            border: none;
+            color: #000;
+            padding: 12px;
+            margin-top: 10px;
+            border-radius: 4px;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        
+        .error {
+            color: #ff0000;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="header">
+            <div>Mobile Terminal</div>
+            <div id="status" class="disconnected">연결 끊김</div>
+        </div>
+        
+        <div id="terminal-container">
+            <div id="terminal"></div>
+        </div>
+        
+        <div id="input-area">
+            <input type="text" id="command-input" placeholder="명령어 입력..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        </div>
+        
+        
+        <div id="controls">
+            <button class="control-btn" onclick="sendEsc()">ESC</button>
+            <button class="control-btn" onclick="clearTerminal()">지우기</button>
+            <button class="control-btn" onclick="sendCtrlC()">Ctrl+C</button>
+            <button class="control-btn" onclick="disconnect()">연결끊기</button>
+        </div>
+    </div>
+    
+    <div id="login-form">
+        <div class="login-box">
+            <h2 style="color: #fff; margin-bottom: 20px; text-align: center;">로그인</h2>
+            <input type="text" id="username" placeholder="사용자명" value="admin">
+            <input type="password" id="password" placeholder="비밀번호" value="admin123">
+            <button onclick="login()">로그인</button>
+            <div id="error" class="error"></div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let token = null;
+        let sessionId = null;
+        let keepAliveInterval = null;
+        let lastOutput = '';
+        let outputBuffer = '';
+        let bufferTimeout = null;
+        
+        // 모바일에서의 터치 이벤트 방지
+        document.addEventListener('touchstart', function(e) {
+            if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
+                e.preventDefault();
+            }
+        }, { passive: false });
+        
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    token = data.token;
+                    document.getElementById('login-form').style.display = 'none';
+                    document.getElementById('error').textContent = '';
+                    connectWebSocket();
+                } else {
+                    document.getElementById('error').textContent = '로그인 실패: ' + (data.error || 'Unknown error');
+                }
+            } catch (error) {
+                document.getElementById('error').textContent = '로그인 오류: ' + error.message;
+            }
+        }
+        
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/terminal`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                updateStatus('연결됨', true);
+                ws.send(JSON.stringify({
+                    type: 'auth',
+                    data: { token }
+                }));
+                
+                // Keep-alive 메커니즘 시작
+                keepAliveInterval = setInterval(() => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        // 빈 메시지를 주기적으로 전송해 연결 유지
+                        ws.send(JSON.stringify({
+                            type: 'ping',
+                            data: { timestamp: Date.now() }
+                        }));
+                    }
+                }, 8000); // 8초마다
+            };
+            
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                
+                switch (message.type) {
+                    case 'auth':
+                        if (message.data.success) {
+                            appendToTerminal('인증 성공! 세션 생성 중...\n');
+                            ws.send(JSON.stringify({
+                                type: 'session',
+                                data: {
+                                    action: 'create',
+                                    shell: '/bin/bash',
+                                    cols: 80,
+                                    rows: 24
+                                }
+                            }));
+                        } else {
+                            appendToTerminal('인증 실패!\n');
+                        }
+                        break;
+                        
+                    case 'session':
+                        if (message.data.action === 'created') {
+                            sessionId = message.data.sessionId;
+                            clearTerminal();
+                        } else if (message.data.action === 'exit') {
+                            appendToTerminal('\n세션이 종료되었습니다.\n');
+                            sessionId = null;
+                        }
+                        break;
+                        
+                    case 'output':
+                        appendToTerminal(message.data.output);
+                        break;
+                        
+                    case 'error':
+                        appendToTerminal(`\n오류: ${message.data.message}\n`);
+                        break;
+                }
+            };
+            
+            ws.onclose = (event) => {
+                console.log('WebSocket closed:', event.code, event.reason);
+                updateStatus('연결 끊김', false);
+                sessionId = null;
+                
+                // Keep-alive 타이머 정리
+                if (keepAliveInterval) {
+                    clearInterval(keepAliveInterval);
+                    keepAliveInterval = null;
+                }
+                
+                // 비정상 종료인 경우만 메시지 표시
+                if (event.code !== 1000) {
+                    appendToTerminal(`\n연결이 끊어졌습니다. (코드: ${event.code})\n`);
+                    
+                    // 자동 재연결 시도 (Claude 사용 중이면 더 빨리)
+                    const delay = event.code === 1006 ? 1000 : 3000; // 예기치 않은 종료는 1초 후
+                    setTimeout(() => {
+                        appendToTerminal('재연결 시도 중...\n');
+                        connectWebSocket();
+                    }, delay);
+                }
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                appendToTerminal('\nWebSocket 오류 발생\n');
+            };
+        }
+        
+        function sendCommand(command) {
+            if (ws && ws.readyState === WebSocket.OPEN && sessionId) {
+                ws.send(JSON.stringify({
+                    type: 'command',
+                    sessionId: sessionId,
+                    data: {
+                        command: command,
+                        encoding: 'utf-8'
+                    }
+                }));
+            }
+        }
+        
+        function appendToTerminal(text) {
+            const terminal = document.getElementById('terminal');
+            
+            // 매우 강력한 ANSI escape sequences 제거
+            let cleanText = text
+                // 모든 ESC 시퀀스 제거 (더 포괄적)
+                .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+                .replace(/\x1b\][^\x07]*\x07/g, '')
+                .replace(/\x1b[()][AB012]/g, '')
+                // 남은 브래킷 패턴들
+                .replace(/\[[0-9]*[ABCDEFGJKST]/g, '')
+                .replace(/\[[0-9;]*[Hfm]/g, '')
+                .replace(/\[[\?]?[0-9]*[hl]/g, '')
+                .replace(/\[[0-9]*[JK]/g, '')
+                .replace(/\[[0-9]*G/g, '')
+                // 특정 패턴들 (스크린샷에서 본 것들)
+                .replace(/\[2K/g, '')
+                .replace(/\[1A/g, '')
+                .replace(/\[G/g, '')
+                // 제어 문자들
+                .replace(/\x07/g, '') // Bell
+                .replace(/\x08/g, '') // Backspace
+                .replace(/\x0D/g, '') // Carriage Return
+                // 줄바꿈 정리
+                .replace(/\r\n/g, '\n')
+                .replace(/\r/g, '')
+                // 연속 공백 정리
+                .replace(/[ ]{2,}/g, ' ');
+            
+            // 중복 출력 방지 - 같은 내용이 연속으로 오면 무시
+            if (cleanText === lastOutput) {
+                return;
+            }
+            
+            // 버퍼에 추가
+            outputBuffer += cleanText;
+            
+            // 기존 타이머 클리어
+            if (bufferTimeout) {
+                clearTimeout(bufferTimeout);
+            }
+            
+            // 200ms 후에 버퍼 내용 출력 (중복 제거)
+            bufferTimeout = setTimeout(() => {
+                if (outputBuffer.length > 0) {
+                    // 연속된 줄바꿈을 최대 2개로 제한
+                    let finalText = outputBuffer.replace(/\n{3,}/g, '\n\n');
+                    
+                    // 빈 줄들 제거
+                    finalText = finalText.replace(/^\n+/, '').replace(/\n+$/, '');
+                    
+                    if (finalText.length > 0 && finalText !== lastOutput) {
+                        terminal.textContent += finalText + '\n';
+                        terminal.scrollTop = terminal.scrollHeight;
+                        lastOutput = finalText;
+                    }
+                    
+                    outputBuffer = '';
+                }
+            }, 200);
+        }
+        
+        function clearTerminal() {
+            document.getElementById('terminal').textContent = '';
+        }
+        
+        function updateStatus(text, isConnected) {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            status.className = isConnected ? 'connected' : 'disconnected';
+        }
+        
+        
+        function sendEsc() {
+            sendCommand('\x1b');
+        }
+        
+        function sendCtrlC() {
+            sendCommand('\x03');
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+            }
+            document.getElementById('login-form').style.display = 'block';
+        }
+        
+        
+        // 텍스트 입력 처리
+        document.getElementById('command-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const input = e.target;
+                const command = input.value;
+                if (command) {
+                    // Claude를 위해 명령어와 Enter 키를 별도로 전송
+                    sendCommand(command);
+                    setTimeout(() => sendCommand('\r'), 50);
+                    input.value = '';
+                } else {
+                    // 빈 입력일 때는 Enter만 전송
+                    sendCommand('\r');
+                }
+            }
+        });
+        
+        // 로그인 폼에서 Enter 키 처리
+        document.getElementById('password').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                login();
+            }
+        });
+        
+        // 화면 방향 변경 시 레이아웃 조정
+        window.addEventListener('orientationchange', () => {
+            setTimeout(() => {
+                // 터미널 스크롤을 맨 아래로
+                const terminal = document.getElementById('terminal');
+                terminal.scrollTop = terminal.scrollHeight;
+            }, 100);
+        });
+    </script>
+</body>
+</html>

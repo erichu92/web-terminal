@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Simple Terminal</title>
+    <style>
+        body {
+            font-family: monospace;
+            background: #000;
+            color: #00ff00;
+            margin: 0;
+            padding: 20px;
+        }
+        
+        #terminal {
+            background: #111;
+            border: 1px solid #333;
+            padding: 10px;
+            height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            margin-bottom: 10px;
+        }
+        
+        #input-area {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        #command-input {
+            flex: 1;
+            background: #111;
+            color: #00ff00;
+            border: 1px solid #333;
+            padding: 10px;
+            font-family: monospace;
+        }
+        
+        button {
+            background: #00ff00;
+            color: #000;
+            border: none;
+            padding: 10px 15px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .output-section {
+            border-top: 1px solid #333;
+            margin-top: 10px;
+            padding-top: 10px;
+        }
+        
+        .input-display {
+            color: #ffff00;
+        }
+        
+        .output-display {
+            color: #00ff00;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Claude 간단 터미널</h1>
+    
+    <div id="input-area">
+        <input type="text" id="command-input" placeholder="Claude에게 질문하세요..." autocomplete="off">
+        <button onclick="askClaude()">질문</button>
+        <button onclick="clearAll()">지우기</button>
+    </div>
+    
+    <div id="terminal">연결 중...</div>
+
+    <script>
+        let ws = null;
+        let sessionId = null;
+        let isClaudeReady = false;
+        let currentOutput = '';
+        let outputBuffer = [];
+        
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/terminal`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                updateTerminal('연결됨. 로그인 중...\n');
+                
+                fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: 'admin', password: 'admin123' })
+                }).then(res => res.json()).then(data => {
+                    ws.send(JSON.stringify({
+                        type: 'auth',
+                        data: { token: data.token }
+                    }));
+                });
+            };
+            
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                
+                switch (message.type) {
+                    case 'auth':
+                        if (message.data.success) {
+                            updateTerminal('인증 성공. 터미널 시작 중...\n');
+                            ws.send(JSON.stringify({
+                                type: 'session',
+                                data: {
+                                    action: 'create',
+                                    shell: '/bin/bash',
+                                    cols: 80,
+                                    rows: 24
+                                }
+                            }));
+                        }
+                        break;
+                        
+                    case 'session':
+                        if (message.data.action === 'created') {
+                            sessionId = message.data.sessionId;
+                            updateTerminal('터미널 준비 완료. Claude 시작 중...\n');
+                            startClaude();
+                        }
+                        break;
+                        
+                    case 'output':
+                        handleClaudeOutput(message.data.output);
+                        break;
+                }
+            };
+        }
+        
+        function startClaude() {
+            sendRawCommand('TERM=dumb NO_COLOR=1 claude\n');
+            
+            // Claude가 시작될 시간을 기다림
+            setTimeout(() => {
+                isClaudeReady = true;
+                updateTerminal('\n🤖 Claude 준비 완료! 질문을 입력하세요.\n\n');
+            }, 3000);
+        }
+        
+        function askClaude() {
+            const input = document.getElementById('command-input');
+            const question = input.value.trim();
+            
+            if (!question || !isClaudeReady) {
+                alert('Claude가 아직 준비되지 않았거나 질문이 비어있습니다.');
+                return;
+            }
+            
+            // 질문 표시
+            addConversation('👤 ' + question, 'input-display');
+            
+            // Claude에게 질문 전송 (한 번에)
+            sendRawCommand(question + '\n');
+            
+            input.value = '';
+            
+            // 답변 수집 시작
+            currentOutput = '';
+            setTimeout(() => {
+                if (currentOutput.trim()) {
+                    addConversation('🤖 ' + cleanClaudeOutput(currentOutput), 'output-display');
+                    currentOutput = '';
+                }
+            }, 5000); // 5초 후 답변 표시
+        }
+        
+        function handleClaudeOutput(output) {
+            if (isClaudeReady) {
+                // Claude의 출력 수집
+                currentOutput += output;
+            } else {
+                // 초기화 단계의 출력은 터미널에 표시
+                updateTerminal(cleanOutput(output));
+            }
+        }
+        
+        function cleanClaudeOutput(text) {
+            return text
+                // 모든 ANSI escape sequences 제거
+                .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+                .replace(/\[[0-9;?]*[a-zA-Z]/g, '')
+                // 제어 문자 제거
+                .replace(/[\x00-\x1F\x7F]/g, '')
+                // 연속 공백 정리
+                .replace(/[ ]{2,}/g, ' ')
+                // 연속 줄바꿈 정리
+                .replace(/\n{3,}/g, '\n\n')
+                // 앞뒤 공백 제거
+                .trim();
+        }
+        
+        function cleanOutput(text) {
+            return text
+                .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+                .replace(/\[[0-9;?]*[a-zA-Z]/g, '')
+                .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, '');
+        }
+        
+        function sendRawCommand(command) {
+            if (!sessionId) return;
+            
+            ws.send(JSON.stringify({
+                type: 'command',
+                sessionId: sessionId,
+                data: { command: command, encoding: 'utf-8' }
+            }));
+        }
+        
+        function addConversation(text, className) {
+            const terminal = document.getElementById('terminal');
+            const div = document.createElement('div');
+            div.className = className;
+            div.textContent = text;
+            terminal.appendChild(div);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+        
+        function updateTerminal(text) {
+            const terminal = document.getElementById('terminal');
+            terminal.textContent += text;
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+        
+        function clearAll() {
+            document.getElementById('terminal').innerHTML = '';
+            currentOutput = '';
+        }
+        
+        // Enter 키로 질문
+        document.getElementById('command-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                askClaude();
+            }
+        });
+        
+        // 자동 연결
+        connect();
+    </script>
+</body>
+</html>
