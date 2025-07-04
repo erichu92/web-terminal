@@ -69,7 +69,7 @@ LLM CLI 도구(Claude Code, GitHub Copilot CLI 등)의 보급으로 **모바일�
 
 ```bash
 # 1. 프로젝트 클론 및 설치
-git clone https://github.com/your-username/web-terminal-server.git
+git clone https://github.com/erichu92/web-terminal-server.git
 cd web-terminal-server
 npm install
 
