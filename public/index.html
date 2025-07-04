@@ -246,7 +246,20 @@
                 
                 recognition.continuous = false;
                 recognition.interimResults = false;
-                recognition.lang = 'ko-KR';
+                
+                // 사용자 브라우저 언어를 기본으로 설정 (다국어 자동 감지)
+                const userLang = navigator.language || navigator.userLanguage || 'en-US';
+                recognition.lang = userLang;
+                
+                // 주요 언어들 중에서 선택 (브라우저가 지원하는 경우)
+                const supportedLangs = ['ko-KR', 'en-US', 'ja-JP', 'zh-CN', 'es-ES', 'fr-FR', 'de-DE'];
+                
+                // 사용자 언어가 지원 목록에 없으면 영어로 폴백
+                if (!supportedLangs.some(lang => userLang.startsWith(lang.split('-')[0]))) {
+                    recognition.lang = 'en-US';
+                }
+                
+                console.log(`음성 인식 언어 설정: ${recognition.lang}`);
                 
                 recognition.onstart = () => {
                     isRecording = true;
@@ -260,12 +273,8 @@
                     const transcript = event.results[0][0].transcript;
                     appendToTerminal(`[음성 인식]: ${transcript}\n`);
                     
-                    // 음성을 명령어로 변환
-                    const command = convertSpeechToCommand(transcript);
-                    if (command) {
-                        document.getElementById('command-input').value = command;
-                        appendToTerminal(`[변환된 명령어]: ${command}\n`);
-                    }
+                    // 인식된 텍스트를 그대로 입력창에 입력
+                    document.getElementById('command-input').value = transcript.trim();
                 };
                 
                 recognition.onerror = (event) => {
@@ -287,103 +296,6 @@
             }
         }
         
-        // 음성을 명령어로 변환
-        function convertSpeechToCommand(speech) {
-            const text = speech.toLowerCase().trim();
-            
-            // 한글 음성 명령어를 영어 명령어로 변환
-            const voiceCommands = {
-                // 기본 명령어
-                '리스트': 'ls',
-                '파일 목록': 'ls -la',
-                '파일목록': 'ls -la',
-                '디렉토리 목록': 'ls -l',
-                '디렉터리 목록': 'ls -l',
-                '현재 디렉토리': 'pwd',
-                '현재디렉토리': 'pwd',
-                '홈으로': 'cd ~',
-                '홈으로 가기': 'cd ~',
-                '위로': 'cd ..',
-                '위로 가기': 'cd ..',
-                '뒤로': 'cd ..',
-                '뒤로 가기': 'cd ..',
-                
-                // Git 명령어
-                '깃 스테이터스': 'git status',
-                '깃 상태': 'git status',
-                '깃상태': 'git status',
-                '깃 로그': 'git log',
-                '깃로그': 'git log',
-                '깃 애드': 'git add .',
-                '깃 커밋': 'git commit -m "update"',
-                '깃 푸시': 'git push',
-                '깃 풀': 'git pull',
-                
-                // 시스템 명령어
-                '프로세스': 'ps aux',
-                '프로세스 목록': 'ps aux',
-                '메모리': 'free -h',
-                '디스크': 'df -h',
-                '네트워크': 'netstat -tuln',
-                '날짜': 'date',
-                '시간': 'date',
-                '업타임': 'uptime',
-                
-                // 개발 관련
-                '노드 버전': 'node --version',
-                '노드버전': 'node --version',
-                'npm 버전': 'npm --version',
-                'npm버전': 'npm --version',
-                '파이썬 버전': 'python --version',
-                '파이썬버전': 'python --version',
-                '도커 버전': 'docker --version',
-                '도커버전': 'docker --version',
-                
-                // 파일 조작
-                '파일 만들기': 'touch ',
-                '디렉토리 만들기': 'mkdir ',
-                '디렉터리 만들기': 'mkdir ',
-                '복사': 'cp ',
-                '이동': 'mv ',
-                '삭제': 'rm ',
-                '권한': 'chmod ',
-                
-                // 텍스트 처리
-                '내용 보기': 'cat ',
-                '텍스트 검색': 'grep ',
-                '파일 찾기': 'find . -name ',
-                
-                // 기타
-                '지우기': 'clear',
-                '클리어': 'clear',
-                '종료': 'exit',
-                '나가기': 'exit',
-                '히스토리': 'history',
-                '도움말': 'help',
-                '맨': 'man ',
-                '매뉴얼': 'man '
-            };
-            
-            // 정확한 매칭 시도
-            if (voiceCommands[text]) {
-                return voiceCommands[text];
-            }
-            
-            // 부분 매칭 시도
-            for (const [korean, command] of Object.entries(voiceCommands)) {
-                if (text.includes(korean)) {
-                    // 추가 파라미터가 있는지 확인
-                    const remaining = text.replace(korean, '').trim();
-                    if (remaining && !command.endsWith(' ')) {
-                        return command + ' ' + remaining;
-                    }
-                    return command;
-                }
-            }
-            
-            // 매칭되는 명령어가 없으면 원본 텍스트 반환
-            return text;
-        }
         
         // 음성 입력 토글
         function toggleVoiceInput() {
