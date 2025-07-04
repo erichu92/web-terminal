@@ -38,7 +38,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-username/web-terminal-server.git"
+    "url": "git+https://github.com/erichu92/web-terminal-server.git"
   },
   "engines": {
     "node": ">=16.0.0",
