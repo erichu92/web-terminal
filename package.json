@@ -1,0 +1,45 @@
+{
+  "name": "web-terminal-server",
+  "version": "1.0.0",
+  "description": "WebSocket-based terminal server with Korean language support",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "jest",
+    "lint": "echo 'No linter configured'",
+    "build": "echo 'Build completed'"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.14.2",
+    "node-pty": "^0.10.1",
+    "iconv-lite": "^0.6.3",
+    "jsonwebtoken": "^9.0.2",
+    "cors": "^2.8.5",
+    "uuid": "^9.0.1",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "jest": "^29.7.0"
+  },
+  "keywords": [
+    "terminal",
+    "websocket",
+    "korean",
+    "web-terminal",
+    "node-pty",
+    "real-time"
+  ],
+  "author": "Web Terminal Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-username/web-terminal-server.git"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  }
+}
